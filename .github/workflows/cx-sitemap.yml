@@ -1,0 +1,136 @@
+name: Build cx-sitemap-all
+
+on:
+  schedule:
+    # Kører hver dag kl. 04:30 UTC (06:30 dansk sommertid / 05:30 vintertid)
+    - cron: "30 4 * * *"
+  workflow_dispatch:        # tillader manuel kørsel fra Actions-fanen
+
+permissions:
+  contents: write           # nødvendig for at committe det opdaterede sitemap
+
+concurrency:
+  group: cx-sitemap
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Skriv build-script
+        run: |
+          cat > build_sitemap.py <<'PY'
+          import csv, gzip, io, re, sys, urllib.request
+          from datetime import date
+
+          BASE = "https://cykelexperten.dk"
+          FIRST_URL = "https://cykelexperten.dk/knowledge-base/support"
+          FEED_URL = "https://cykelexperten.dk/store-api/product-export/SWPETUHTVZZXUNZNZEC4OFM3ZW/digital-advisor.xml"
+          SHEET_ID = "1GlKjfBctsWJYUXircL7apDm8DwPFhXSD-OPBqCnEzVQ"
+          SHEET_TABS = {"Filter categories sitemap": "797849434"}  # kun dette ark
+          SHEET_CSV = "https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid={gid}" % SHEET_ID
+          CATEGORY_GZ = "https://cykelexperten.dk/sitemap/ee798397bfae48b89e2321b80cc04d9c/categorys/category-sitemap0.xml.gz"
+          OUTPUT = "cx-sitemap-all.xml"
+          URLS_PER_FILE = 50000
+          TIMEOUT = 90
+          URL_RE = re.compile(r"^https://cykelexperten\.dk/\S+$")
+
+          def fetch(url, decode_gzip=False):
+              req = urllib.request.Request(url, headers={"User-Agent": "cx-sitemap-bot/1.0"})
+              with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                  data = r.read()
+              if decode_gzip:
+                  data = gzip.decompress(data)
+              return data.decode("utf-8", "replace")
+
+          def from_feed():
+              xml = fetch(FEED_URL)
+              return re.findall(r"<link>(https://cykelexperten\.dk/[^<]+)</link>", xml)
+
+          def from_sheet():
+              urls = []
+              for name, gid in SHEET_TABS.items():
+                  try:
+                      text = fetch(SHEET_CSV.format(gid=gid))
+                  except Exception as e:
+                      print("  ! sheet tab '%s' failed: %s" % (name, e), file=sys.stderr); continue
+                  for row in csv.reader(io.StringIO(text)):
+                      if row:
+                          cell = row[0].strip()
+                          if cell.startswith("http") and "cykelexperten.dk" in cell:
+                              urls.append(cell)
+              return urls
+
+          def from_category():
+              xml = fetch(CATEGORY_GZ, decode_gzip=True)
+              return re.findall(r"<loc>(https://cykelexperten\.dk/[^<]+)</loc>", xml)
+
+          def clean(urls):
+              return [u.strip() for u in urls if URL_RE.match(u.strip())]
+
+          def dedupe(ordered):
+              seen, result = set(), []
+              for u in ordered:
+                  if u not in seen:
+                      seen.add(u); result.append(u)
+              return result
+
+          def esc(u):
+              return (u.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                       .replace('"', "&quot;").replace("'", "&apos;"))
+
+          def write_urlset(path, urls, lastmod):
+              lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                       '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+              for u in urls:
+                  lines += ["  <url>", "    <loc>%s</loc>" % esc(u),
+                            "    <lastmod>%s</lastmod>" % lastmod, "  </url>"]
+              lines += ["</urlset>", ""]
+              open(path, "w", encoding="utf-8").write("\n".join(lines))
+
+          def write_index(path, files, lastmod):
+              lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                       '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+              for f in files:
+                  lines += ["  <sitemap>", "    <loc>%s/%s</loc>" % (BASE, f),
+                            "    <lastmod>%s</lastmod>" % lastmod, "  </sitemap>"]
+              lines += ["</sitemapindex>", ""]
+              open(path, "w", encoding="utf-8").write("\n".join(lines))
+
+          def main():
+              lastmod = date.today().isoformat()
+              s3 = clean(from_category()); print("S3:", len(s3))
+              s2 = clean(from_sheet());    print("S2:", len(s2))
+              s1 = clean(from_feed());     print("S1:", len(s1))
+              combined = dedupe([FIRST_URL] + s3 + s2 + s1)
+              print("Total:", len(combined))
+              if combined[0] != FIRST_URL:
+                  raise SystemExit("First URL must be the support page!")
+              if len(combined) <= URLS_PER_FILE:
+                  write_urlset(OUTPUT, combined, lastmod)
+              else:
+                  files = []
+                  for i in range(0, len(combined), URLS_PER_FILE):
+                      fname = "cx-sitemap-all-%d.xml" % (i // URLS_PER_FILE + 1)
+                      write_urlset(fname, combined[i:i+URLS_PER_FILE], lastmod); files.append(fname)
+                  write_index(OUTPUT, files, lastmod)
+
+          main()
+          PY
+          python3 build_sitemap.py
+
+      - name: Commit & push hvis ændret
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f build_sitemap.py
+          git add cx-sitemap-all*.xml
+          if git diff --cached --quiet; then
+            echo "Ingen ændringer i sitemap."
+          else
+            git commit -m "chore: dagligt cx-sitemap-all ($(date -u +%Y-%m-%d))"
+            git push
+          fi
