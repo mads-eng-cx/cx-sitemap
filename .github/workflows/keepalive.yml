@@ -1,0 +1,43 @@
+name: Keepalive (hold scheduled workflows aktive)
+
+# GitHub deaktiverer planlagte (cron) workflows i OFFENTLIGE repos efter 60 dages
+# inaktivitet — dvs. hvis der ikke er lavet nye commits. Denne workflow laver en
+# lille commit via GitHub-API'et, men KUN hvis seneste commit er ældre end 45 dage.
+# Så nulstilles timeren, og alle repoets schedules holdes kørende. Commit'en laves
+# med den indbyggede GITHUB_TOKEN og trigger ikke andre workflows (ingen løkke).
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # hver mandag kl. 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Commit keepalive hvis repo har været inaktivt i >45 dage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          last=$(gh api "repos/$REPO/commits?per_page=1" --jq '.[0].commit.committer.date')
+          age=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 86400 ))
+          echo "Seneste commit: $age dage siden ($last)"
+          if [ "$age" -lt 45 ]; then
+            echo "Under 45 dage — ingen handling nødvendig."
+            exit 0
+          fi
+          sha=$(gh api "repos/$REPO/contents/.keepalive" --jq '.sha' 2>/dev/null || true)
+          content=$(date -u +%Y-%m-%dT%H:%M:%SZ | base64 -w0)
+          if [ -n "${sha:-}" ]; then
+            gh api -X PUT "repos/$REPO/contents/.keepalive" \
+              -f message="chore: keepalive" -f content="$content" -f sha="$sha" >/dev/null
+          else
+            gh api -X PUT "repos/$REPO/contents/.keepalive" \
+              -f message="chore: keepalive" -f content="$content" >/dev/null
+          fi
+          echo "Keepalive-commit oprettet via API — timeren er nulstillet."
