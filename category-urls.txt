@@ -412,7 +412,6 @@ https://cykelexperten.dk/viden/cykeludstyr/hometrainer-guide/
 https://cykelexperten.dk/abus-quin/
 https://cykelexperten.dk/brand/trek/
 https://cykelexperten.dk/badges/
-https://cykelexperten.dk/viden/gravel-bikes/hvad-er-en-gravel-bike/
 https://cykelexperten.dk/forsikringsgodkendte-cykellaase/
 https://cykelexperten.dk/viden/cykeludstyr/hvilken-cykellaas-skal-jeg-vaelge/
 https://cykelexperten.dk/viden/cykel-med-indvendige-eller-udvendige-gear/
@@ -717,7 +716,6 @@ https://cykelexperten.dk/brand/elitewheels/
 https://cykelexperten.dk/brand/bianchi-velomann/
 https://cykelexperten.dk/viden/lazer-kineticore-den-ultimative-sikkerhed-i-cykelhjelmen/
 https://cykelexperten.dk/brand/jagwire/
-https://cykelexperten.dk/supportcenter
 https://cykelexperten.dk/made-in-italy/
 https://cykelexperten.dk/brand/cadex/
 https://cykelexperten.dk/brand/scicon/
